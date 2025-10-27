@@ -1,132 +1,103 @@
-import { useEffect, useState } from 'react';
-import { Upload, FileText, CheckCircle2, Loader2, Trash2 } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Upload, CheckCircle2, Download, File, Info, Star } from 'lucide-react';
 
-export default function ResumeUpload({ onSelect }) {
-  const [file, setFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [resumes, setResumes] = useState([]);
-  const [active, setActive] = useState(null);
-
-  const backend = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-
-  async function loadResumes() {
-    try {
-      const res = await fetch(`${backend}/resume`);
-      const data = await res.json();
-      setResumes(data);
-      if (data.length && !active) {
-        setActive(data[0].id);
-        onSelect?.(data[0].id);
-      }
-    } catch (e) {
-      console.error('Failed to load resumes', e);
-    }
-  }
-
-  useEffect(() => {
-    loadResumes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  async function handleUpload(e) {
-    e.preventDefault();
-    if (!file) return;
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch(`${backend}/resume/upload`, {
-        method: 'POST',
-        body: form,
-      });
-      if (!res.ok) throw new Error('Upload failed');
-      await loadResumes();
-      setFile(null);
-    } catch (err) {
-      console.error(err);
-      alert('Upload failed. Try a smaller file (max ~5MB).');
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  function selectResume(id) {
-    setActive(id);
-    onSelect?.(id);
-  }
+export default function ResumeUpload({ resumes, onUpload, onSelect, activeResumeId, onDownload }) {
+  const inputRef = useRef(null);
 
   return (
-    <section className="bg-white rounded-2xl border border-gray-200 p-5 sm:p-6 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <div className="h-9 w-9 rounded-lg bg-rose-50 text-rose-600 grid place-items-center">
-            <FileText size={18} />
-          </div>
-          <h2 className="text-lg font-semibold">Resume</h2>
+    <section id="resumes" className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">Your Resumes</h2>
+          <p className="text-sm text-gray-500 mt-1">Upload and manage multiple versions. No client-side file size limit.</p>
         </div>
-        {active && (
-          <a
-            href={`${backend}/resume/${active}`}
-            className="text-sm text-rose-700 hover:text-rose-800"
-          >
-            Download active
-          </a>
-        )}
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <Upload className="w-4 h-4" /> Upload
+        </button>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            // Intentionally no size check to keep uploads unlimited on the client side
+            const reader = new FileReader();
+            reader.onload = () => {
+              const dataUrl = reader.result;
+              onUpload?.(file, dataUrl);
+            };
+            reader.readAsArrayBuffer(file);
+            // Reset input so same file can be selected again
+            e.target.value = '';
+          }}
+        />
       </div>
 
-      <form onSubmit={handleUpload} className="rounded-xl border border-dashed border-gray-300 p-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">Upload resume (PDF, DOCX)</label>
-        <div className="flex items-center gap-3">
-          <input
-            type="file"
-            accept=".pdf,.doc,.docx,.txt"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            className="flex-1 text-sm"
-          />
-          <button
-            type="submit"
-            disabled={!file || uploading}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
-          >
-            {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />} Upload
-          </button>
-        </div>
-        <p className="mt-2 text-xs text-gray-500">Stored securely in your workspace and attached when sending applications.</p>
-      </form>
-
-      <div className="mt-4">
-        <p className="text-sm font-medium text-gray-700 mb-2">Your uploads</p>
-        {resumes.length === 0 && (
-          <div className="p-4 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-600">No resumes uploaded yet.</div>
-        )}
-        <div className="space-y-2">
-          {resumes.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              onClick={() => selectResume(r.id)}
-              className={`w-full text-left p-3 rounded-lg border ${active === r.id ? 'border-rose-300 bg-rose-50' : 'border-gray-200 hover:bg-gray-50'}`}
-            >
-              <div className="flex items-center justify-between">
+      <div className="mt-6">
+        {resumes.length === 0 ? (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-gray-50 border border-dashed border-gray-300 text-gray-600">
+            <Info className="w-4 h-4" />
+            <p className="text-sm">No resumes yet. Click Upload to add your first file.</p>
+          </div>
+        ) : (
+          <ul className="space-y-3">
+            {resumes.map((r) => (
+              <li
+                key={r.id}
+                className={`flex items-center justify-between p-4 rounded-xl border ${activeResumeId === r.id ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white'}`}
+              >
                 <div className="flex items-center gap-3">
-                  <CheckCircle2 size={16} className={active === r.id ? 'text-rose-600' : 'text-gray-400'} />
+                  <div className={`p-2 rounded-lg ${activeResumeId === r.id ? 'bg-indigo-100 text-indigo-700' : 'bg-gray-100 text-gray-600'}`}>
+                    <File className="w-4 h-4" />
+                  </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{r.original_name}</p>
-                    <p className="text-xs text-gray-500">{(r.size / 1024).toFixed(1)} KB • {r.content_type}</p>
+                    <p className="font-medium flex items-center gap-2">
+                      {r.name}
+                      {activeResumeId === r.id && (
+                        <span className="inline-flex items-center gap-1 text-xs text-indigo-700">
+                          <Star className="w-3 h-3 fill-indigo-600 text-indigo-600"/> Active
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs text-gray-500">{r.type} • {formatBytes(r.size)}</p>
                   </div>
                 </div>
-                <a
-                  href={`${backend}/resume/${r.id}`}
-                  className="text-xs text-gray-600 hover:text-gray-800"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Download
-                </a>
-              </div>
-            </button>
-          ))}
-        </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    className={`px-3 py-1.5 text-sm rounded-md border ${activeResumeId === r.id ? 'border-indigo-600 text-indigo-700 bg-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+                    onClick={() => onSelect?.(r.id)}
+                  >
+                    {activeResumeId === r.id ? (
+                      <span className="inline-flex items-center gap-1"><CheckCircle2 className="w-4 h-4"/> Selected</span>
+                    ) : (
+                      'Select'
+                    )}
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2"
+                    onClick={() => onDownload?.(r)}
+                  >
+                    <Download className="w-4 h-4"/> Download
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </section>
   );
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
