@@ -38,6 +38,7 @@ export default function App() {
       try {
         setLoadingResumes(true);
         const res = await fetch(`${API_BASE}/resume`);
+        if (!res.ok) throw new Error(`Failed to load resumes: ${res.status}`);
         const data = await res.json();
         const mapped = data.map((d) => ({
           id: d.id,
@@ -64,7 +65,7 @@ export default function App() {
     form.append('file', namedFile);
     try {
       const res = await fetch(`${API_BASE}/resume/upload`, { method: 'POST', body: form });
-      if (!res.ok) throw new Error('Upload failed');
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
       const saved = await res.json();
       const item = { id: saved.id, name: saved.original_name, type: saved.content_type, size: saved.size };
       setResumes((prev) => [item, ...prev]);
@@ -78,7 +79,7 @@ export default function App() {
   const handleDownload = async (resume) => {
     try {
       const res = await fetch(`${API_BASE}/resume/${resume.id}`);
-      if (!res.ok) throw new Error('Download failed');
+      if (!res.ok) throw new Error(`Download failed: ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -94,8 +95,9 @@ export default function App() {
     }
   };
 
+  // Return the planned array so callers can use it immediately
   const handlePlan = async () => {
-    if (!activeResumeId || settings.boards.length === 0) return;
+    if (!activeResumeId || settings.boards.length === 0) return [];
     try {
       const body = {
         boards: settings.boards,
@@ -111,7 +113,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error('Planning failed');
+      if (!res.ok) throw new Error(`Planning failed: ${res.status}`);
       const data = await res.json();
       // Map to UI planned preview times using today with planned_time hour:minute
       const now = new Date();
@@ -121,10 +123,13 @@ export default function App() {
         t.setHours(h, m, 0, 0);
         return { id: d.id, board: d.board, time: t.toISOString(), minScore: d.match_score ?? settings.minScore, paraphraseLevel: d.paraphrase_level ?? settings.paraphraseLevel };
       });
-      setPlanned(plannedUi.sort((a, b) => new Date(a.time) - new Date(b.time)));
+      const sorted = plannedUi.sort((a, b) => new Date(a.time) - new Date(b.time));
+      setPlanned(sorted);
+      return sorted;
     } catch (e) {
       console.error(e);
       alert('Planning failed.');
+      return [];
     }
   };
 
@@ -132,22 +137,17 @@ export default function App() {
     if (!activeResumeId || settings.boards.length === 0) return;
     setSending(true);
     try {
-      // Ensure there is a plan
-      if (planned.length === 0) {
-        await handlePlan();
-      }
-      const ids = (planned.length > 0 ? planned : []).map((p) => p.id).filter(Boolean);
-      if (ids.length === 0) {
-        // fallback: plan again
-        await handlePlan();
-      }
-      const finalIds = (planned.length > 0 ? planned : []).map((p) => p.id).filter(Boolean);
+      // Ensure there is a plan and use the result immediately
+      const planToUse = planned.length > 0 ? planned : await handlePlan();
+      const ids = (planToUse || []).map((p) => p.id).filter(Boolean);
+      if (ids.length === 0) throw new Error('No planned applications to send');
+
       const res = await fetch(`${API_BASE}/apply/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ application_ids: finalIds }),
+        body: JSON.stringify({ application_ids: ids }),
       });
-      if (!res.ok) throw new Error('Send failed');
+      if (!res.ok) throw new Error(`Send failed: ${res.status}`);
       const data = await res.json();
       const nowIso = new Date().toISOString();
       setSent(data.map((d) => ({ board: d.board, time: nowIso })));
