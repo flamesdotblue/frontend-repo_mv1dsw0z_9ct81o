@@ -23,6 +23,9 @@ export default function App() {
     windowEnd: '18:00',
   });
 
+  const [sent, setSent] = useState([]);
+  const [sending, setSending] = useState(false);
+
   const keywords = useMemo(() => extractKeywords(jdText, 25), [jdText]);
 
   const planned = useMemo(() => {
@@ -78,6 +81,23 @@ export default function App() {
     link.remove();
   };
 
+  const handleApplyNow = async () => {
+    if (!activeResumeId || settings.boards.length === 0) return;
+    setSending(true);
+    try {
+      // Use the plan if it exists; otherwise create instant entries per selected board
+      const items = planned.length > 0
+        ? planned
+        : settings.boards.map((b) => ({ board: b, time: new Date().toISOString() }));
+
+      // Simulate sending locally
+      await new Promise((r) => setTimeout(r, 600));
+      setSent(items.map((i) => ({ board: i.board, time: i.time || new Date().toISOString() })));
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50">
       <Header />
@@ -107,6 +127,9 @@ export default function App() {
           onSettingsChange={setSettings}
           planned={planned}
           onPlan={() => { /* Local-only preview */ }}
+          sent={sent}
+          sending={sending}
+          onApplyNow={handleApplyNow}
         />
 
         <section className="rounded-2xl border border-gray-200 bg-white p-6">
@@ -115,7 +138,7 @@ export default function App() {
             <li>Upload and select your preferred resume version.</li>
             <li>Paste a job description to see the top keywords instantly.</li>
             <li>Configure job boards and pacing, then review the planned schedule.</li>
-            <li>Hook this UI to your API to persist plans and send applications automatically.</li>
+            <li>Use Apply now to submit instantly in this demo, or connect to your API to submit to job boards.</li>
           </ul>
         </section>
       </main>

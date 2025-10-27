@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Send, Timer, ListChecks, AlertTriangle } from 'lucide-react';
+import { Send, Timer, ListChecks, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const jobBoards = [
   { key: 'linkedin', label: 'LinkedIn' },
@@ -8,10 +8,22 @@ const jobBoards = [
   { key: 'foundit', label: 'Foundit' },
 ];
 
-export default function AutoApplyPanel({ activeResumeId, settings, onSettingsChange, planned, onPlan }) {
+export default function AutoApplyPanel({
+  activeResumeId,
+  settings,
+  onSettingsChange,
+  planned,
+  onPlan,
+  sent = [],
+  sending = false,
+  onApplyNow,
+}) {
   const resumeMissing = !activeResumeId;
 
-  const disabled = useMemo(() => resumeMissing || settings.boards.length === 0, [resumeMissing, settings.boards.length]);
+  const disabled = useMemo(
+    () => resumeMissing || settings.boards.length === 0,
+    [resumeMissing, settings.boards.length]
+  );
 
   return (
     <section id="planner" className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
@@ -132,17 +144,42 @@ export default function AutoApplyPanel({ activeResumeId, settings, onSettingsCha
             )}
           </div>
 
-          <button
-            disabled={disabled}
-            onClick={onPlan}
-            className={`w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg ${disabled ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'} `}
-          >
-            <Send className="w-4 h-4"/> Plan
-          </button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <button
+              disabled={disabled}
+              onClick={onPlan}
+              className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg ${disabled ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+            >
+              <Send className="w-4 h-4"/> Plan
+            </button>
+            <button
+              disabled={disabled || sending}
+              onClick={onApplyNow}
+              className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg ${disabled || sending ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+            >
+              <Send className="w-4 h-4"/> {sending ? 'Applying…' : 'Apply now'}
+            </button>
+          </div>
+
+          {sent.length > 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-sm font-medium text-emerald-800 mb-2 inline-flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4"/> Sent applications
+              </p>
+              <ul className="text-sm text-emerald-900 space-y-1">
+                {sent.map((s, i) => (
+                  <li key={i} className="flex items-center justify-between">
+                    <span className="capitalize">{s.board}</span>
+                    <span className="text-emerald-700">{new Date(s.time).toLocaleString()}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="text-xs text-gray-500 flex items-start gap-2">
             <ListChecks className="w-4 h-4 mt-0.5"/>
-            This plans a human-like schedule locally. Hook it to your API to persist and send.
+            This demo sends locally. Connect to your backend to persist and submit to job boards.
           </div>
         </div>
       </div>
