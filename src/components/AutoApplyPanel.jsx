@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Play, Pause, ShieldCheck, Globe, Linkedin, Search, CheckCircle2 } from 'lucide-react';
+import { Play, Pause, ShieldCheck, Globe, Linkedin, Search, CheckCircle2, Timer, Repeat, Gauge } from 'lucide-react';
 
 // Simple icon shim for boards where we don't have dedicated icons
 function BoardIcon({ name }) {
@@ -28,12 +28,23 @@ function generateMockJobs(profile, keywords) {
   }));
 }
 
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
 export default function AutoApplyPanel({ profile, jdKeywords }) {
   const [selectedBoards, setSelectedBoards] = useState(new Set(['LinkedIn', 'Glassdoor']));
   const [safeMode, setSafeMode] = useState(true);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState([]);
   const [minScore, setMinScore] = useState(70);
+
+  // Humanization controls
+  const [paraphraseLevel, setParaphraseLevel] = useState(65); // how much to vary wording
+  const [minDelay, setMinDelay] = useState(18); // seconds
+  const [maxDelay, setMaxDelay] = useState(55); // seconds
+  const [dailyCap, setDailyCap] = useState(18); // max applies per day
+  const [timeWindow, setTimeWindow] = useState({ start: 9, end: 19 }); // local hours
 
   const mockJobs = useMemo(() => generateMockJobs(profile, jdKeywords), [profile, jdKeywords]);
 
@@ -50,12 +61,27 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
 
   function startScan() {
     setRunning(true);
-    // Simulate async scanning and applying
+    // Simulated plan: pick up to dailyCap items and attach human-like pacing
+    const cap = clamp(dailyCap, 1, 50);
+    const windowed = filtered.slice(0, cap).map((j, idx) => {
+      const baseDelay = minDelay + Math.random() * Math.max(1, maxDelay - minDelay);
+      const hour = clamp(Math.round(timeWindow.start + Math.random() * (timeWindow.end - timeWindow.start)), timeWindow.start, timeWindow.end);
+      const minute = Math.floor(Math.random() * 60)
+        .toString()
+        .padStart(2, '0');
+      return {
+        ...j,
+        planned: true,
+        paraphraseLevel,
+        delay: Math.round(baseDelay),
+        plannedTime: `${hour}:${minute}`,
+        safeMode,
+      };
+    });
     setTimeout(() => {
-      const applied = filtered.map((j) => ({ ...j, applied: true, safeMode }));
-      setResults(applied);
+      setResults(windowed);
       setRunning(false);
-    }, 700);
+    }, 600);
   }
 
   function stopScan() {
@@ -96,25 +122,27 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
       </div>
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-1">
-          <p className="text-sm font-medium text-gray-700 mb-2">Sources</p>
-          <div className="space-y-2">
-            {ALL_BOARDS.map((b) => (
-              <label key={b} className="flex items-center justify-between gap-3 p-2 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
-                <span className="inline-flex items-center gap-2 text-sm text-gray-700">
-                  <BoardIcon name={b} /> {b}
-                </span>
-                <input
-                  type="checkbox"
-                  checked={selectedBoards.has(b)}
-                  onChange={() => toggleBoard(b)}
-                  className="rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
-                />
-              </label>
-            ))}
+        <div className="md:col-span-1 space-y-4">
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Sources</p>
+            <div className="space-y-2">
+              {ALL_BOARDS.map((b) => (
+                <label key={b} className="flex items-center justify-between gap-3 p-2 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer">
+                  <span className="inline-flex items-center gap-2 text-sm text-gray-700">
+                    <BoardIcon name={b} /> {b}
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={selectedBoards.has(b)}
+                    onChange={() => toggleBoard(b)}
+                    className="rounded border-gray-300 text-cyan-600 focus:ring-cyan-500"
+                  />
+                </label>
+              ))}
+            </div>
           </div>
 
-          <div className="mt-4">
+          <div>
             <label className="flex items-center justify-between text-sm text-gray-700">
               <span>Minimum match score</span>
               <span className="font-medium text-gray-900">{minScore}%</span>
@@ -129,13 +157,92 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
             />
           </div>
 
-          <p className="mt-3 text-xs text-gray-500">Safe mode randomizes delays, rotates phrasing, and keeps apply volume human-like to avoid detection.</p>
+          <div className="rounded-xl border border-gray-200 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Repeat size={16} className="text-amber-600" />
+              <p className="text-sm font-medium text-gray-800">Humanization</p>
+            </div>
+            <label className="flex items-center justify-between text-xs text-gray-700">
+              <span>Paraphrase level</span>
+              <span className="font-medium text-gray-900">{paraphraseLevel}%</span>
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={paraphraseLevel}
+              onChange={(e) => setParaphraseLevel(Number(e.target.value))}
+              className="mt-1 w-full"
+            />
+            <div className="mt-3 grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="flex items-center gap-1 text-gray-700"><Timer size={14} /> Min delay</label>
+                <input
+                  type="number"
+                  min={5}
+                  max={300}
+                  value={minDelay}
+                  onChange={(e) => setMinDelay(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border-gray-300 focus:border-cyan-500 focus:ring-cyan-500"
+                />
+                <p className="mt-1 text-[11px] text-gray-500">seconds</p>
+              </div>
+              <div>
+                <label className="flex items-center gap-1 text-gray-700"><Timer size={14} /> Max delay</label>
+                <input
+                  type="number"
+                  min={5}
+                  max={600}
+                  value={maxDelay}
+                  onChange={(e) => setMaxDelay(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border-gray-300 focus:border-cyan-500 focus:ring-cyan-500"
+                />
+                <p className="mt-1 text-[11px] text-gray-500">seconds</p>
+              </div>
+              <div>
+                <label className="flex items-center gap-1 text-gray-700"><Gauge size={14} /> Daily cap</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={dailyCap}
+                  onChange={(e) => setDailyCap(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border-gray-300 focus:border-cyan-500 focus:ring-cyan-500"
+                />
+                <p className="mt-1 text-[11px] text-gray-500">max applies/day</p>
+              </div>
+              <div>
+                <label className="flex items-center gap-1 text-gray-700"><Timer size={14} /> Time window</label>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={timeWindow.start}
+                    onChange={(e) => setTimeWindow((w) => ({ ...w, start: Number(e.target.value) }))}
+                    className="w-full rounded-lg border-gray-300 focus:border-cyan-500 focus:ring-cyan-500"
+                  />
+                  <span className="text-gray-500">to</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={timeWindow.end}
+                    onChange={(e) => setTimeWindow((w) => ({ ...w, end: Number(e.target.value) }))}
+                    className="w-full rounded-lg border-gray-300 focus:border-cyan-500 focus:ring-cyan-500"
+                  />
+                </div>
+                <p className="mt-1 text-[11px] text-gray-500">local hours</p>
+              </div>
+            </div>
+            <p className="mt-3 text-[11px] text-gray-500">Applies will be paced within your window, with varied phrasing based on the JD to keep things natural.</p>
+          </div>
         </div>
 
         <div className="md:col-span-2">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium text-gray-700">Matches</p>
-            <span className="text-xs text-gray-500">{filtered.length} found</span>
+            <p className="text-sm font-medium text-gray-700">Planned matches</p>
+            <span className="text-xs text-gray-500">{filtered.length} found • up to {Math.min(filtered.length, dailyCap)} planned</span>
           </div>
           <div className="grid grid-cols-1 gap-3">
             {filtered.map((job) => (
@@ -149,7 +256,9 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
                     <CheckCircle2 size={14} /> {job.score}% match
                   </span>
                 </div>
-                <div className="mt-3 text-xs text-gray-500">Action: {running ? 'Scanning…' : 'Would auto-apply with tailored resume'}</div>
+                <div className="mt-3 text-xs text-gray-500">
+                  {running ? 'Scanning…' : 'Planned: apply with tailored wording and human-like delays'}
+                </div>
               </div>
             ))}
 
@@ -160,8 +269,14 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
             )}
 
             {results.length > 0 && (
-              <div className="mt-2 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600">
-                Applied to {results.length} jobs in simulation. Connect accounts to enable real submissions.
+              <div className="mt-2 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 space-y-1">
+                {results.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between">
+                    <span>{r.company} — {r.title}</span>
+                    <span className="text-gray-500">{r.plannedTime} • delay ~{r.delay}s • paraphrase {r.paraphraseLevel}%</span>
+                  </div>
+                ))}
+                <p className="pt-1 text-[11px] text-gray-500">Safe mode is {safeMode ? 'on' : 'off'} — volume and timing are adjusted to avoid bursty patterns.</p>
               </div>
             )}
           </div>
