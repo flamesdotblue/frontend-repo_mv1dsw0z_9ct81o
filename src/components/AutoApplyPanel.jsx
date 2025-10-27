@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Play, Pause, ShieldCheck, Globe, Linkedin, Search, CheckCircle2, Timer, Repeat, Gauge } from 'lucide-react';
+import { Play, Pause, ShieldCheck, Globe, Linkedin, Search, CheckCircle2, Timer, Repeat, Gauge, AlertTriangle } from 'lucide-react';
 
-// Simple icon shim for boards where we don't have dedicated icons
 function BoardIcon({ name }) {
   const base = 'h-4 w-4';
   switch (name) {
@@ -32,19 +31,20 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-export default function AutoApplyPanel({ profile, jdKeywords }) {
+export default function AutoApplyPanel({ profile, jdKeywords, resumeId }) {
   const [selectedBoards, setSelectedBoards] = useState(new Set(['LinkedIn', 'Glassdoor']));
   const [safeMode, setSafeMode] = useState(true);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState([]);
   const [minScore, setMinScore] = useState(70);
 
-  // Humanization controls
-  const [paraphraseLevel, setParaphraseLevel] = useState(65); // how much to vary wording
-  const [minDelay, setMinDelay] = useState(18); // seconds
-  const [maxDelay, setMaxDelay] = useState(55); // seconds
-  const [dailyCap, setDailyCap] = useState(18); // max applies per day
-  const [timeWindow, setTimeWindow] = useState({ start: 9, end: 19 }); // local hours
+  const [paraphraseLevel, setParaphraseLevel] = useState(65);
+  const [minDelay, setMinDelay] = useState(18);
+  const [maxDelay, setMaxDelay] = useState(55);
+  const [dailyCap, setDailyCap] = useState(18);
+  const [timeWindow, setTimeWindow] = useState({ start: 9, end: 19 });
+
+  const backend = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
   const mockJobs = useMemo(() => generateMockJobs(profile, jdKeywords), [profile, jdKeywords]);
 
@@ -59,32 +59,57 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
     setSelectedBoards(next);
   }
 
-  function startScan() {
+  async function createPlan() {
+    if (!resumeId) {
+      alert('Upload and select a resume first.');
+      return;
+    }
     setRunning(true);
-    // Simulated plan: pick up to dailyCap items and attach human-like pacing
-    const cap = clamp(dailyCap, 1, 50);
-    const windowed = filtered.slice(0, cap).map((j, idx) => {
-      const baseDelay = minDelay + Math.random() * Math.max(1, maxDelay - minDelay);
-      const hour = clamp(Math.round(timeWindow.start + Math.random() * (timeWindow.end - timeWindow.start)), timeWindow.start, timeWindow.end);
-      const minute = Math.floor(Math.random() * 60)
-        .toString()
-        .padStart(2, '0');
-      return {
-        ...j,
-        planned: true,
-        paraphraseLevel,
-        delay: Math.round(baseDelay),
-        plannedTime: `${hour}:${minute}`,
-        safeMode,
+    try {
+      const body = {
+        boards: Array.from(selectedBoards),
+        resume_id: resumeId,
+        min_score: minScore,
+        paraphrase_level: paraphraseLevel,
+        daily_cap: clamp(dailyCap, 1, 50),
+        time_window_start: timeWindow.start,
+        time_window_end: timeWindow.end,
       };
-    });
-    setTimeout(() => {
+      const res = await fetch(`${backend}/apply/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Failed to plan');
+      const data = await res.json();
+      setResults(data);
+    } catch (e) {
+      console.error(e);
+      // fallback to local simulation
+      const cap = clamp(dailyCap, 1, 50);
+      const windowed = filtered.slice(0, cap).map((j) => {
+        const baseDelay = minDelay + Math.random() * Math.max(1, maxDelay - minDelay);
+        const hour = clamp(Math.round(timeWindow.start + Math.random() * (timeWindow.end - timeWindow.start)), timeWindow.start, timeWindow.end);
+        const minute = Math.floor(Math.random() * 60).toString().padStart(2, '0');
+        return {
+          id: j.id,
+          board: j.source,
+          job_title: j.title,
+          company: j.company,
+          resume_id: resumeId,
+          match_score: j.score,
+          paraphrase_level: paraphraseLevel,
+          planned_time: `${hour}:${minute}`,
+          status: 'planned',
+        };
+      });
       setResults(windowed);
+    } finally {
       setRunning(false);
-    }, 600);
+    }
   }
 
-  function stopScan() {
+  function stop() {
     setRunning(false);
   }
 
@@ -110,16 +135,22 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
             </span>
           </label>
           {running ? (
-            <button onClick={stopScan} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-900 text-white hover:bg-black">
+            <button onClick={stop} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-900 text-white hover:bg-black">
               <Pause size={16} /> Stop
             </button>
           ) : (
-            <button onClick={startScan} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-cyan-600 text-white hover:bg-cyan-700">
-              <Play size={16} /> Start
+            <button onClick={createPlan} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-cyan-600 text-white hover:bg-cyan-700">
+              <Play size={16} /> Plan
             </button>
           )}
         </div>
       </div>
+
+      {!resumeId && (
+        <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-center gap-2">
+          <AlertTriangle size={16} /> Upload and select a resume to attach with applications.
+        </div>
+      )}
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-1 space-y-4">
@@ -235,7 +266,7 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
                 <p className="mt-1 text-[11px] text-gray-500">local hours</p>
               </div>
             </div>
-            <p className="mt-3 text-[11px] text-gray-500">Applies will be paced within your window, with varied phrasing based on the JD to keep things natural.</p>
+            <p className="mt-3 text-[11px] text-gray-500">Applications are paced and phrased to feel human. Your selected resume will be attached when sending.</p>
           </div>
         </div>
 
@@ -257,7 +288,7 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
                   </span>
                 </div>
                 <div className="mt-3 text-xs text-gray-500">
-                  {running ? 'Scanning…' : 'Planned: apply with tailored wording and human-like delays'}
+                  {running ? 'Planning…' : 'Ready to plan with tailored wording and human-like delays'}
                 </div>
               </div>
             ))}
@@ -272,8 +303,8 @@ export default function AutoApplyPanel({ profile, jdKeywords }) {
               <div className="mt-2 p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-700 space-y-1">
                 {results.map((r) => (
                   <div key={r.id} className="flex items-center justify-between">
-                    <span>{r.company} — {r.title}</span>
-                    <span className="text-gray-500">{r.plannedTime} • delay ~{r.delay}s • paraphrase {r.paraphraseLevel}%</span>
+                    <span>{r.company || '—'} — {r.job_title || r.board}</span>
+                    <span className="text-gray-500">{r.planned_time} • paraphrase {r.paraphrase_level}%</span>
                   </div>
                 ))}
                 <p className="pt-1 text-[11px] text-gray-500">Safe mode is {safeMode ? 'on' : 'off'} — volume and timing are adjusted to avoid bursty patterns.</p>
