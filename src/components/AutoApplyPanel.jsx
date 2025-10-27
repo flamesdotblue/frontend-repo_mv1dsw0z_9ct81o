@@ -179,7 +179,7 @@ export default function AutoApplyPanel({
 
           <div className="text-xs text-gray-500 flex items-start gap-2">
             <ListChecks className="w-4 h-4 mt-0.5"/>
-            This demo sends locally. Connect to your backend to persist and submit to job boards.
+            Connected to backend demo for planning and sending. Records are saved for this session.
           </div>
         </div>
       </div>

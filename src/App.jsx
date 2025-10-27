@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Header from './components/Header';
 import ResumeUpload from './components/ResumeUpload';
 import JDAnalyzer from './components/JDAnalyzer';
@@ -8,6 +8,8 @@ import AutoApplyPanel from './components/AutoApplyPanel';
 const STOPWORDS = new Set([
   'a','an','the','and','or','but','if','then','else','when','at','by','for','in','of','on','to','from','up','down','with','as','is','are','was','were','be','been','being','it','its','that','this','these','those','you','your','yours','we','our','ours','they','their','theirs','i','me','my','mine','he','she','him','her','his','hers','do','does','did','doing','have','has','had','having','not','no','yes','can','could','should','would','may','might','will','just'
 ]);
+
+const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
 export default function App() {
   const [resumes, setResumes] = useState([]);
@@ -23,76 +25,135 @@ export default function App() {
     windowEnd: '18:00',
   });
 
+  const [planned, setPlanned] = useState([]);
   const [sent, setSent] = useState([]);
   const [sending, setSending] = useState(false);
+  const [loadingResumes, setLoadingResumes] = useState(false);
 
   const keywords = useMemo(() => extractKeywords(jdText, 25), [jdText]);
 
-  const planned = useMemo(() => {
-    // Create a light local plan preview based on settings
-    if (!activeResumeId || settings.boards.length === 0) return [];
-    const now = new Date();
-    const [startH, startM] = settings.windowStart.split(':').map(Number);
-    const [endH, endM] = settings.windowEnd.split(':').map(Number);
-    const start = new Date(now);
-    start.setHours(startH, startM, 0, 0);
-    const end = new Date(now);
-    end.setHours(endH, endM, 0, 0);
+  useEffect(() => {
+    // Load existing resumes from backend
+    const load = async () => {
+      try {
+        setLoadingResumes(true);
+        const res = await fetch(`${API_BASE}/resume`);
+        const data = await res.json();
+        const mapped = data.map((d) => ({
+          id: d.id,
+          name: d.original_name,
+          type: d.content_type,
+          size: d.size,
+        }));
+        setResumes(mapped);
+        if (mapped.length > 0) setActiveResumeId(mapped[0].id);
+      } catch (e) {
+        console.error('Failed to load resumes', e);
+      } finally {
+        setLoadingResumes(false);
+      }
+    };
+    load();
+  }, []);
 
-    const slots = [];
-    const total = Math.min(settings.dailyCap, settings.boards.length * 3);
-    for (let i = 0; i < total; i++) {
-      const board = settings.boards[i % settings.boards.length];
-      const t = new Date(start.getTime() + Math.random() * Math.max(1, end.getTime() - start.getTime()));
-      slots.push({
-        board,
-        time: t.toISOString(),
-        minScore: settings.minScore,
-        paraphraseLevel: settings.paraphraseLevel,
-      });
+  const handleUpload = async (file, dataBuffer) => {
+    // Upload to backend using multipart; no client-side size limit
+    const form = new FormData();
+    const blob = dataBuffer instanceof ArrayBuffer ? new Blob([dataBuffer], { type: file.type || 'application/octet-stream' }) : file;
+    const namedFile = new File([blob], file.name, { type: file.type || 'application/octet-stream' });
+    form.append('file', namedFile);
+    try {
+      const res = await fetch(`${API_BASE}/resume/upload`, { method: 'POST', body: form });
+      if (!res.ok) throw new Error('Upload failed');
+      const saved = await res.json();
+      const item = { id: saved.id, name: saved.original_name, type: saved.content_type, size: saved.size };
+      setResumes((prev) => [item, ...prev]);
+      setActiveResumeId(item.id);
+    } catch (e) {
+      console.error('Upload error', e);
+      alert('Upload failed. Please try again.');
     }
-    return slots.sort((a, b) => new Date(a.time) - new Date(b.time));
-  }, [activeResumeId, settings]);
-
-  const handleUpload = (file, dataBuffer) => {
-    // Store locally for demo: id, name, type, size, and a blob for download
-    const id = crypto.randomUUID();
-    let blob;
-    if (dataBuffer instanceof ArrayBuffer) {
-      blob = new Blob([dataBuffer], { type: file.type || 'application/octet-stream' });
-    } else if (dataBuffer instanceof Blob) {
-      blob = dataBuffer;
-    } else {
-      blob = new Blob([], { type: file.type || 'application/octet-stream' });
-    }
-    const url = URL.createObjectURL(blob);
-    const next = { id, name: file.name, type: file.type, size: file.size, url };
-    setResumes((prev) => [next, ...prev]);
-    setActiveResumeId(id);
   };
 
-  const handleDownload = (resume) => {
-    if (!resume?.url) return;
-    const link = document.createElement('a');
-    link.href = resume.url;
-    link.download = resume.name || 'resume';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
+  const handleDownload = async (resume) => {
+    try {
+      const res = await fetch(`${API_BASE}/resume/${resume.id}`);
+      if (!res.ok) throw new Error('Download failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = resume.name || 'resume';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Download error', e);
+      alert('Download failed.');
+    }
+  };
+
+  const handlePlan = async () => {
+    if (!activeResumeId || settings.boards.length === 0) return;
+    try {
+      const body = {
+        boards: settings.boards,
+        resume_id: activeResumeId,
+        min_score: settings.minScore,
+        paraphrase_level: settings.paraphraseLevel,
+        daily_cap: settings.dailyCap,
+        time_window_start: Number(settings.windowStart.split(':')[0]),
+        time_window_end: Number(settings.windowEnd.split(':')[0]),
+      };
+      const res = await fetch(`${API_BASE}/apply/plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error('Planning failed');
+      const data = await res.json();
+      // Map to UI planned preview times using today with planned_time hour:minute
+      const now = new Date();
+      const plannedUi = data.map((d) => {
+        const [h, m] = (d.planned_time || '09:00').split(':').map((x) => Number(x));
+        const t = new Date(now);
+        t.setHours(h, m, 0, 0);
+        return { id: d.id, board: d.board, time: t.toISOString(), minScore: d.match_score ?? settings.minScore, paraphraseLevel: d.paraphrase_level ?? settings.paraphraseLevel };
+      });
+      setPlanned(plannedUi.sort((a, b) => new Date(a.time) - new Date(b.time)));
+    } catch (e) {
+      console.error(e);
+      alert('Planning failed.');
+    }
   };
 
   const handleApplyNow = async () => {
     if (!activeResumeId || settings.boards.length === 0) return;
     setSending(true);
     try {
-      // Use the plan if it exists; otherwise create instant entries per selected board
-      const items = planned.length > 0
-        ? planned
-        : settings.boards.map((b) => ({ board: b, time: new Date().toISOString() }));
-
-      // Simulate sending locally
-      await new Promise((r) => setTimeout(r, 600));
-      setSent(items.map((i) => ({ board: i.board, time: i.time || new Date().toISOString() })));
+      // Ensure there is a plan
+      if (planned.length === 0) {
+        await handlePlan();
+      }
+      const ids = (planned.length > 0 ? planned : []).map((p) => p.id).filter(Boolean);
+      if (ids.length === 0) {
+        // fallback: plan again
+        await handlePlan();
+      }
+      const finalIds = (planned.length > 0 ? planned : []).map((p) => p.id).filter(Boolean);
+      const res = await fetch(`${API_BASE}/apply/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ application_ids: finalIds }),
+      });
+      if (!res.ok) throw new Error('Send failed');
+      const data = await res.json();
+      const nowIso = new Date().toISOString();
+      setSent(data.map((d) => ({ board: d.board, time: nowIso })));
+    } catch (e) {
+      console.error(e);
+      alert('Apply now failed.');
     } finally {
       setSending(false);
     }
@@ -105,7 +166,7 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-4 py-8 space-y-8">
         <div className="rounded-2xl p-6 bg-indigo-50/60 border border-indigo-100">
           <p className="text-gray-800 text-sm">
-            Tip: You can upload large resumes here — there is no client-side size limit applied in this UI. For truly unlimited sizes in production, ensure your backend and proxy also allow large payloads.
+            Tip: You can upload large resumes here — there is no client-side size limit. Backend accepts large payloads subject to infrastructure limits.
           </p>
         </div>
 
@@ -124,9 +185,9 @@ export default function App() {
         <AutoApplyPanel
           activeResumeId={activeResumeId}
           settings={settings}
-          onSettingsChange={setSettings}
+          onSettingsChange={(s) => { setSettings(s); setPlanned([]); }}
           planned={planned}
-          onPlan={() => { /* Local-only preview */ }}
+          onPlan={handlePlan}
           sent={sent}
           sending={sending}
           onApplyNow={handleApplyNow}
@@ -138,7 +199,7 @@ export default function App() {
             <li>Upload and select your preferred resume version.</li>
             <li>Paste a job description to see the top keywords instantly.</li>
             <li>Configure job boards and pacing, then review the planned schedule.</li>
-            <li>Use Apply now to submit instantly in this demo, or connect to your API to submit to job boards.</li>
+            <li>Use Apply now to submit via the backend demo endpoints.</li>
           </ul>
         </section>
       </main>
